@@ -19,12 +19,6 @@ public class HdrFile {
 	public int Width { get; private set; }
 	public int Height { get; private set; }
 
-	int cursor;
-
-	public HdrFile ()
-	{
-	}
-
 	public void SetDimensions (int width, int height)
 	{
 		this.Width = width;
@@ -32,10 +26,9 @@ public class HdrFile {
 		colors = new Color32[width * height];
 	}
 
-	public void AddColor (Color32 color)
+	public void SetColors (Color32[] c)
 	{
-		colors[cursor] = color;
-		cursor++;
+		colors = c;
 	}
 
 	public Texture2D ToTexture (bool mipmap, bool linear)
@@ -60,8 +53,10 @@ public class HdrAssetImporter : AssetPostprocessor {
 		foreach (var hdr in hdrFiles) {
 			var data = ReadHdrFile (hdr);
 			var tex = data.ToTexture (false, true);
-			var dir = Path.GetPathRoot (hdr);
-			AssetDatabase.CreateAsset (tex, dir + "/" + Path.GetFileNameWithoutExtension (hdr) + ".asset");
+			var filename = Path.GetFileNameWithoutExtension (hdr);
+			var path = Path.GetDirectoryName (hdr) + "/" + filename + ".asset";
+			AssetDatabase.CreateAsset (tex, path);
+			Debug.Log ("Created HDR texture asset for image file: " + filename);
 		}
 	}
 
@@ -102,15 +97,40 @@ public class HdrAssetImporter : AssetPostprocessor {
 				// Read the dimensions
 				string[] size = sr.ReadLine ().Split (' ');
 				// FIXME assuming that it's -Y +X layout
-				hdr.SetDimensions (int.Parse (size[1]), int.Parse (size[3]));
-				
+				int width = int.Parse (size[1]);
+				int height = int.Parse (size[3]);
+				Color32[] pixels = new Color32[width * height];
+
+				hdr.SetDimensions (width, height);
+
 				StringBuilder sb = new StringBuilder ();
-				while (sr.Peek () > 0) {
+				Color lastColor = Color.black;
+				int cursor = 0;
+				while (cursor <= pixels.Length) {
 					byte[] bytes = new byte[4];
 					stream.Read (bytes, 0, 4);
-					Color32 c = new Color32 (bytes[0], bytes[1], bytes[2], bytes[3]);
-					hdr.AddColor (c);
+					Color32 newColor = new Color32 (bytes[0], bytes[1], bytes[2], bytes[3]);
+					// unpack run-length encoded pixels
+					if (newColor.r == 255 && newColor.g == 255 && newColor.b == 255) {
+						cursor++;
+						for (int i = 0; i < newColor.a; i++) {
+							pixels[cursor] = lastColor;
+							cursor++;
+						}
+					} else {
+						try {
+							pixels[cursor] = newColor;
+						} catch {
+						}
+					}
+					lastColor = newColor;
+					cursor++;
 				}
+//				Debug.Log (cursor);
+
+				hdr.SetColors (pixels);
+
+//				// TODO set the colors in the HdrFile object
 			}
 		}
 		return hdr;
