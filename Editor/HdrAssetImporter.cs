@@ -8,14 +8,20 @@ using System.Text;
 
 public class HdrFile {
 
-	public enum Format
-	{
+	public enum Format {
 		RGBE,
 		XYZE
 	}
 
+	public enum Compression {
+		Uncompressed,
+		RLE,
+		AdaptiveRLE
+	}
+
 	Color32[] colors;
 	public Format format;
+	public Compression compression;
 	public int Width { get; private set; }
 	public int Height { get; private set; }
 
@@ -38,6 +44,11 @@ public class HdrFile {
 		return tex;
 	}
 }
+
+
+// Example implementation:
+// http://code.google.com/p/glorg2/source/browse/Glorg2/Glorg2/Resource/HdrImporter.cs?r=cf4dcecac8eae0e7a94bb8f03d6a63e483333a29
+
 
 public class HdrAssetImporter : AssetPostprocessor {
 
@@ -99,38 +110,45 @@ public class HdrAssetImporter : AssetPostprocessor {
 				// FIXME assuming that it's -Y +X layout
 				int width = int.Parse (size[1]);
 				int height = int.Parse (size[3]);
-				Color32[] pixels = new Color32[width * height];
+				Color32[] buffer = new Color32[width * height];
 
 				hdr.SetDimensions (width, height);
 
 				StringBuilder sb = new StringBuilder ();
 				Color lastColor = Color.black;
 				int cursor = 0;
-				while (cursor <= pixels.Length) {
-					byte[] bytes = new byte[4];
-					stream.Read (bytes, 0, 4);
-					Color32 newColor = new Color32 (bytes[0], bytes[1], bytes[2], bytes[3]);
-					// unpack run-length encoded pixels
-					if (newColor.r == 255 && newColor.g == 255 && newColor.b == 255) {
+
+				while (cursor < buffer.Length) {
+					byte[] rgbe = new byte[4];
+					stream.Read (rgbe, 0, 4);
+
+					if (width < 8 || width > 32767) {
+						hdr.compression = HdrFile.Compression.Uncompressed;
+					} else if (cursor == 0 && rgbe [0] == 2 && rgbe [1] == 2) {
+						hdr.compression = HdrFile.Compression.AdaptiveRLE;
+					}
+
+					Color32 c = new Color32 (rgbe[0], rgbe[1], rgbe[2], rgbe[3]);
+					if (hdr.compression == HdrFile.Compression.AdaptiveRLE) {
+
+						// TODO
+						
+					} else if (c.r == 255 && c.g == 255 && c.b == 255) {
+						// Old run-length encoding
+						hdr.compression = HdrFile.Compression.RLE;
 						cursor++;
-						for (int i = 0; i < newColor.a; i++) {
-							pixels[cursor] = lastColor;
+						for (int i = 0; i < c.a; i++) {
+							buffer [cursor] = lastColor;
 							cursor++;
 						}
 					} else {
-						try {
-							pixels[cursor] = newColor;
-						} catch {
-						}
+						buffer[cursor] = c;
 					}
-					lastColor = newColor;
+					lastColor = c;
 					cursor++;
 				}
-//				Debug.Log (cursor);
 
-				hdr.SetColors (pixels);
-
-//				// TODO set the colors in the HdrFile object
+				hdr.SetColors (buffer);
 			}
 		}
 		return hdr;
